@@ -61,14 +61,16 @@ namespace fwgetter
             while (!stoppingToken.IsCancellationRequested)//endless cycle
             {
                 var devices = client.Execute<List<JsonReps.device>>(requestDevices);
-
+                devices.Data.ForEach((item) => _logger.LogDebug(item.identifier));
                 var firmwareListings = new List<JsonReps.FirmwareListing>();
 
                 foreach (var device in devices.Data)//get firmwares for all devices
                 {
                     _logger.LogDebug("getting devices...");
-                    firmwareListings.Add(client.Execute<JsonReps.FirmwareListing>(requestFirmware.AddParameter("id", device.identifier)).Data);//not right
-                    _logger.LogDebug(firmwareListings[0].name);
+                    var resp = client.Execute<JsonReps.FirmwareListing>(requestFirmware.AddParameter("id", device.identifier.Replace(" ",String.Empty)));
+                    _logger.LogDebug(resp.IsSuccessful.ToString());
+                    firmwareListings.Add(resp.Data);
+                    _logger.LogDebug(firmwareListings.Count.ToString());
                 }
 
                 foreach (var device in firmwareListings)//create dir for new devices found
@@ -85,7 +87,7 @@ namespace fwgetter
                 {
                     if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
                     {
-                        await using var writer = File.Create($@".\IPSW\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].buildid}.ipsw");
+                        await using var writer = File.Create($@".\IPSW\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
 
                         requestDownload.ResponseWriter = stream =>//sets the request to write straight to disk, skipping memory buffers
                         {
@@ -110,7 +112,7 @@ namespace fwgetter
                         firmwareListing.firmwares[0].buildid)))
                     {
                         lastUpdates.Add(firmwareListing.name,firmwareListing.firmwares[0].buildid);
-                        _logger.LogInformation($"added entry to update history: {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
+                        _logger.LogInformation($"added entry to update history: {firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}");
                     }
 
                 }
