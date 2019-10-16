@@ -15,10 +15,9 @@ namespace fwgetter
             {
                 CreateHostBuilder(args).Build().Run();
             }
-            catch (Exception e)
+            catch (OperationCanceledException)
             {
-                Console.WriteLine(e);
-                throw;
+                
             }
             
         }

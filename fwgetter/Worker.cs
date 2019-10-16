@@ -56,20 +56,14 @@ namespace fwgetter
             var client = new RestClient("https://api.ipsw.me/v4/");
             var requestDevices = new RestRequest("devices");
             var requestFirmware = new RestRequest("device/{id}?type=ipsw");
-            var requestDownload = new RestRequest("/ipsw/download/{identifier}/{buildid}");
 
-            
+
             while (!stoppingToken.IsCancellationRequested)//endless cycle
             {
                 var devices = client.Execute<List<JsonReps.device>>(requestDevices).Data;
                 devices.ForEach((item) => _logger.LogDebug(item.identifier));
                 var firmwareListings = new List<JsonReps.FirmwareListing>();
 
-                foreach (var t in devices)//TODO
-                {
-                    t.name = t.name.Replace(@" / ", "l");
-                    t.name = t.name.Replace(@" \ ", "l");
-                }
 
                 foreach (var device in devices)//get firmwares for all devices
                 {
@@ -83,6 +77,7 @@ namespace fwgetter
 
                 foreach (var device in firmwareListings)//create dir for new devices found
                 {
+                    device.name = device.name.Replace(@" / ", "l");//clean names
                     
                     if (!Directory.Exists($@"C:\ipsw\{device.name}"))
                     {
@@ -94,43 +89,61 @@ namespace fwgetter
                 
                 foreach (var firmwareListing in firmwareListings)
                 {   
-                    requestDownload = new RestRequest("/ipsw/download/{identifier}/{buildid}");
-
-                    _logger.LogDebug(firmwareListing.firmwares[0].buildid);
-                    if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
+                    var requestDownload = new RestRequest();
+                    var clientApple = new RestClient();
+                    
+                        try
                     {
-                        await using var writer = File.Create($@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
-
-                        requestDownload.ResponseWriter = stream =>//sets the request to write straight to disk, skipping memory buffers
+                        if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
                         {
-                            using (stream)
-                            {
-                                stream.CopyTo(writer);
-                            }
+                            await using var writer =
+                                File.Create($@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
 
-                        };
+                            requestDownload.ResponseWriter =
+                                stream => //sets the request to write straight to disk, skipping memory buffers
+                                {
+                                    using (stream)
+                                    {
+                                        stream.CopyTo(writer);
+                                    }
 
-                        var response = client.DownloadData(requestDownload.AddUrlSegment("identifier",firmwareListing.identifier).AddUrlSegment("buildid",firmwareListing.firmwares[0].buildid));
+                                };
 
-                        _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
+                            requestDownload.Resource = firmwareListing.firmwares[0].url;
+                            _logger.LogInformation($"starting download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
+
+                            var response = client.DownloadData(requestDownload);
+
+                            _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
+
+                        }
+                    }
+                    catch (Exception)
+                    {
+
+                        _logger.LogWarning($"no IPSW found for {firmwareListing.name}");
 
                     }
-
                 }
 
                 foreach (var firmwareListing in firmwareListings)//update update history
                 {
-                    if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name,
-                        firmwareListing.firmwares[0].buildid)))
+                    try
                     {
-                        lastUpdates.Add(firmwareListing.name,firmwareListing.firmwares[0].buildid);
-                        _logger.LogInformation($"added entry to update history: {firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}");
+                        if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
+                        {
+                            lastUpdates.Add(firmwareListing.name, firmwareListing.firmwares[0].buildid);
+                            _logger.LogInformation(
+                                $"added entry to update history: {firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}");
+                        }
                     }
-
+                    catch (Exception)
+                    {
+                        //ignore, this just means the device has no firmware
+                    }
                 }
 
-
-                await Task.Delay(10000, stoppingToken);
+                await Task.Delay(1800000, stoppingToken);
             }
         }
 
