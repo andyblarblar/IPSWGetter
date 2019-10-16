@@ -58,13 +58,20 @@ namespace fwgetter
             var requestFirmware = new RestRequest("device/{id}?type=ipsw");
             var requestDownload = new RestRequest("/ipsw/download/{identifier}/{buildid}");
 
+            
             while (!stoppingToken.IsCancellationRequested)//endless cycle
             {
-                var devices = client.Execute<List<JsonReps.device>>(requestDevices);
-                devices.Data.ForEach((item) => _logger.LogDebug(item.identifier));
+                var devices = client.Execute<List<JsonReps.device>>(requestDevices).Data;
+                devices.ForEach((item) => _logger.LogDebug(item.identifier));
                 var firmwareListings = new List<JsonReps.FirmwareListing>();
 
-                foreach (var device in devices.Data)//get firmwares for all devices
+                foreach (var t in devices)//TODO
+                {
+                    t.name = t.name.Replace(@" / ", "l");
+                    t.name = t.name.Replace(@" \ ", "l");
+                }
+
+                foreach (var device in devices)//get firmwares for all devices
                 {
                     var tempReq = new RestRequest("device/{id}?type=ipsw");
                     _logger.LogDebug("getting devices...");
