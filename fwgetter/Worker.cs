@@ -15,7 +15,7 @@ namespace fwgetter
     {
         private readonly ILogger<Worker> _logger;
 
-        private Dictionary<string, string> lastUpdates;//phone name, buildId 
+        private Dictionary<string, string> lastUpdates = new Dictionary<string, string>();//phone name, buildId 
 
         public Worker(ILogger<Worker> logger)
         {
@@ -25,10 +25,10 @@ namespace fwgetter
        
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
-            if (File.Exists(@".\last.bin"))
+            if (File.Exists(@"C:\ipsw\last.bin"))
             {
                 var serializer = new BinaryFormatter();
-                await using var fileStream = File.Open(@".\last.bin", FileMode.Open);
+                await using var fileStream = File.Open(@"C:\ipsw\last.bin", FileMode.Open);
                 lastUpdates = (Dictionary<string, string>)serializer.Deserialize(fileStream);
                  _logger.LogCritical("Loaded update history at " + DateTimeOffset.Now);
 
@@ -40,9 +40,9 @@ namespace fwgetter
 
             }
 
-            if (!Directory.Exists(".\\IPSW\\"))
+            if (!Directory.Exists("C:\\ipsw\\"))
             {
-                Directory.CreateDirectory(".\\IPSW\\");
+                Directory.CreateDirectory("C:\\ipsw\\");
             }
 
 
@@ -66,28 +66,33 @@ namespace fwgetter
 
                 foreach (var device in devices.Data)//get firmwares for all devices
                 {
+                    var tempReq = new RestRequest("device/{id}?type=ipsw");
                     _logger.LogDebug("getting devices...");
-                    var resp = client.Execute<JsonReps.FirmwareListing>(requestFirmware.AddParameter("id", device.identifier.Replace(" ",String.Empty)));
-                    _logger.LogDebug(resp.IsSuccessful.ToString());
+                    var resp = client.Execute<JsonReps.FirmwareListing>(tempReq.AddUrlSegment("id", device.identifier.Replace(" ",string.Empty)));
+                    _logger.LogDebug(resp.Data.name);
                     firmwareListings.Add(resp.Data);
                     _logger.LogDebug(firmwareListings.Count.ToString());
                 }
 
                 foreach (var device in firmwareListings)//create dir for new devices found
                 {
-                    _logger.LogDebug("creating new directory");
-                    if (!Directory.Exists($@".\IPSW\{device.name}"))
+                    
+                    if (!Directory.Exists($@"C:\ipsw\{device.name}"))
                     {
-                        Directory.CreateDirectory($@".\IPSW\{device.name}");
+                        _logger.LogDebug($@"creating new directory C:\ipsw\{device.name}");
+                        Directory.CreateDirectory($@"C:\ipsw\{device.name}");
                     }
                     
                 }
-
+                
                 foreach (var firmwareListing in firmwareListings)
-                {
+                {   
+                    requestDownload = new RestRequest("/ipsw/download/{identifier}/{buildid}");
+
+                    _logger.LogDebug(firmwareListing.firmwares[0].buildid);
                     if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
                     {
-                        await using var writer = File.Create($@".\IPSW\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
+                        await using var writer = File.Create($@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
 
                         requestDownload.ResponseWriter = stream =>//sets the request to write straight to disk, skipping memory buffers
                         {
@@ -98,7 +103,7 @@ namespace fwgetter
 
                         };
 
-                        var response = client.DownloadData(requestDownload);
+                        var response = client.DownloadData(requestDownload.AddUrlSegment("identifier",firmwareListing.identifier).AddUrlSegment("buildid",firmwareListing.firmwares[0].buildid));
 
                         _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
@@ -127,13 +132,13 @@ namespace fwgetter
         {
             var serializer = new BinaryFormatter();
 
-            if (!File.Exists(@".\last.bin"))
+            if (!File.Exists(@"C:\ipsw\last.bin"))
             {
-                File.Create(@".\last.bin").Dispose();
+                File.Create(@"C:\ipsw\last.bin").Dispose();
                 
             }
 
-            serializer.Serialize(File.Open(@".\last.bin",FileMode.Create),lastUpdates);
+            serializer.Serialize(File.Open(@"C:\ipsw\last.bin",FileMode.Create),lastUpdates);
 
             _logger.LogCritical("successfully saved update log ");
             return base.StopAsync(cancellationToken);

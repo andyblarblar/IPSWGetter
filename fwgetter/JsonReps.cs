@@ -27,18 +27,19 @@ namespace fwgetter
             public string url { get; set; }
             public string releasedate { get; set; }
             public string uploaddate { get; set; }
-            public bool signed { get; set; }
+            //public bool signed { get; set; }
         }
 
         public class FirmwareListing
         {
             public string name { get; set; }
             public string identifier { get; set; }
+            public string boardconfig { get; set; }
             public string platform { get; set; }
             public int cpid { get; set; }
             public int bdid { get; set; }
 
-            public List<firmware> firmwares;
+            public List<firmware> firmwares { get; set; }
 
 
         }
