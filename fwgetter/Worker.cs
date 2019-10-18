@@ -56,7 +56,7 @@ namespace fwgetter
             var client = new RestClient("https://api.ipsw.me/v4/");
             var requestDevices = new RestRequest("devices");
             var requestFirmware = new RestRequest("device/{id}?type=ipsw");
-
+            var po = new ParallelOptions { CancellationToken = stoppingToken };
 
             while (!stoppingToken.IsCancellationRequested)//endless cycle
             {
@@ -65,15 +65,17 @@ namespace fwgetter
                 var firmwareListings = new List<JsonReps.FirmwareListing>();
 
 
-                foreach (var device in devices)//get firmwares for all devices
+                Parallel.ForEach(devices, po, (device) => //get firmwares for all devices
                 {
                     var tempReq = new RestRequest("device/{id}?type=ipsw");
                     _logger.LogDebug("getting devices...");
-                    var resp = client.Execute<JsonReps.FirmwareListing>(tempReq.AddUrlSegment("id", device.identifier.Replace(" ",string.Empty)));
+                    var resp = client.Execute<JsonReps.FirmwareListing>(tempReq.AddUrlSegment("id",
+                        device.identifier.Replace(" ", string.Empty)));
                     _logger.LogDebug(resp.Data.name);
                     firmwareListings.Add(resp.Data);
                     _logger.LogDebug(firmwareListings.Count.ToString());
-                }
+                    
+                });
 
                 foreach (var device in firmwareListings)//create dir for new devices found
                 {
@@ -86,18 +88,24 @@ namespace fwgetter
                     }
                     
                 }
+
                 
-                foreach (var firmwareListing in firmwareListings)
-                {   
+                Parallel.ForEach(firmwareListings, po, async firmwareListing => 
+                {
                     var requestDownload = new RestRequest();
                     var clientApple = new RestClient();
-                    
-                        try
+
+                    try
                     {
-                        if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
+                        if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name,
+                                firmwareListing.firmwares[0].buildid)) && !File.Exists(
+                                $@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw")
+                        )
+
                         {
                             await using var writer =
-                                File.Create($@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
+                                File.Create(
+                                    $@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
 
                             requestDownload.ResponseWriter =
                                 stream => //sets the request to write straight to disk, skipping memory buffers
@@ -110,21 +118,34 @@ namespace fwgetter
                                 };
 
                             requestDownload.Resource = firmwareListing.firmwares[0].url;
-                            _logger.LogInformation($"starting download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
-                            var response = client.DownloadData(requestDownload);
+                            _logger.LogInformation(
+                                $"starting download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
+                            if (po.CancellationToken.IsCancellationRequested) return;
+
+                            var response = await Task.Run(() => client.DownloadData(requestDownload), stoppingToken);
+
+                            if (po.CancellationToken.IsCancellationRequested) return;
                             _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
                         }
                     }
+
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogCritical("operation cancelled");
+
+                    }
+
                     catch (Exception)
                     {
 
                         _logger.LogWarning($"no IPSW found for {firmwareListing.name}");
 
                     }
-                }
+
+                });
 
                 foreach (var firmwareListing in firmwareListings)//update update history
                 {
@@ -145,6 +166,8 @@ namespace fwgetter
 
                 await Task.Delay(1800000, stoppingToken);
             }
+
+            await StopAsync(stoppingToken);
         }
 
 
