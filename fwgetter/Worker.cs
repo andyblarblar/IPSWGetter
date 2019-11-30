@@ -17,7 +17,7 @@ namespace fwgetter
 
         private Dictionary<string, string> lastUpdates = new Dictionary<string, string>();//phone name, buildId 
 
-        private readonly string FwgetterDir = Environment.GetEnvironmentVariable("FWGETTER_PATH") ?? "C:\\";//sets the dir to wright files to, either by an enviormental var or {FwgetterDir}. 
+        private readonly string FwgetterDir = Environment.GetEnvironmentVariable("FWGETTER_PATH", EnvironmentVariableTarget.User) ?? "C:\\";//sets the dir to wright files to, either by an enviormental var or {FwgetterDir}. 
 
         public Worker(ILogger<Worker> logger)
         {
