@@ -17,6 +17,8 @@ namespace fwgetter
 
         private Dictionary<string, string> lastUpdates = new Dictionary<string, string>();//phone name, buildId 
 
+        private readonly string FwgetterDir = Environment.GetEnvironmentVariable("FWGETTER_PATH") ?? "C:\\";//sets the dir to wright files to, either by an enviormental var or {FwgetterDir}. 
+
         public Worker(ILogger<Worker> logger)
         {
             _logger = logger;
@@ -25,10 +27,11 @@ namespace fwgetter
        
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
-            if (File.Exists(@"C:\ipsw\last.bin"))
+            _logger.LogCritical($"using path: {FwgetterDir}");
+            if (File.Exists($@"{FwgetterDir}\ipsw\last.bin"))//load past history
             {
                 var serializer = new BinaryFormatter();
-                await using var fileStream = File.Open(@"C:\ipsw\last.bin", FileMode.Open);
+                await using var fileStream = File.Open($@"{FwgetterDir}\ipsw\last.bin", FileMode.Open);
                 lastUpdates = (Dictionary<string, string>)serializer.Deserialize(fileStream);
                  _logger.LogCritical("Loaded update history at " + DateTimeOffset.Now);
 
@@ -40,9 +43,9 @@ namespace fwgetter
 
             }
 
-            if (!Directory.Exists("C:\\ipsw\\"))
+            if (!Directory.Exists($@"{FwgetterDir}\ipsw\"))
             {
-                Directory.CreateDirectory("C:\\ipsw\\");
+                Directory.CreateDirectory($@"{FwgetterDir}\ipsw\");
             }
 
 
@@ -79,12 +82,12 @@ namespace fwgetter
 
                 foreach (var device in firmwareListings)//create dir for new devices found
                 {
-                    device.name = device.name.Replace(@" / ", "l");//clean names
+                    device.name = device.name.Replace($@" / ", "l");//clean names
                     
-                    if (!Directory.Exists($@"C:\ipsw\{device.name}"))
+                    if (!Directory.Exists($@"{FwgetterDir}\ipsw\{device.name}"))
                     {
-                        _logger.LogDebug($@"creating new directory C:\ipsw\{device.name}");
-                        Directory.CreateDirectory($@"C:\ipsw\{device.name}");
+                        _logger.LogDebug($@"creating new directory {FwgetterDir}\ipsw\{device.name}");
+                        Directory.CreateDirectory($@"{FwgetterDir}\ipsw\{device.name}");
                     }
                     
                 }
@@ -99,13 +102,13 @@ namespace fwgetter
                     {
                         if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name,
                                 firmwareListing.firmwares[0].buildid)) && !File.Exists(
-                                $@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw")
+                                $@"{FwgetterDir}\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw")
                         )
 
                         {
                             await using var writer =
                                 File.Create(
-                                    $@"C:\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
+                                    $@"{FwgetterDir}\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
 
                             requestDownload.ResponseWriter =
                                 stream => //sets the request to write straight to disk, skipping memory buffers
@@ -175,13 +178,13 @@ namespace fwgetter
         {
             var serializer = new BinaryFormatter();
 
-            if (!File.Exists(@"C:\ipsw\last.bin"))
+            if (!File.Exists($@"{FwgetterDir}\ipsw\last.bin"))
             {
-                File.Create(@"C:\ipsw\last.bin").Dispose();
+                File.Create($@"{FwgetterDir}\ipsw\last.bin").Dispose();
                 
             }
 
-            serializer.Serialize(File.Open(@"C:\ipsw\last.bin",FileMode.Create),lastUpdates);
+            serializer.Serialize(File.Open($@"{FwgetterDir}\ipsw\last.bin",FileMode.Create),lastUpdates);
 
             _logger.LogCritical("successfully saved update log ");
             return base.StopAsync(cancellationToken);
