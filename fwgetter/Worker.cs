@@ -18,6 +18,10 @@ namespace fwgetter
         private Dictionary<string, string> lastUpdates = new Dictionary<string, string>();//phone name, buildId 
 
         private readonly string FwgetterDir = Environment.GetEnvironmentVariable("FWGETTER_PATH", EnvironmentVariableTarget.User) ?? "C:\\";//sets the dir to wright files to, either by an enviormental var or {FwgetterDir}. 
+        
+        private delegate void QuitDel();
+        private event QuitDel OnQuit; 
+        private List<FileStream> streams = new List<FileStream>();
 
         public Worker(ILogger<Worker> logger)
         {
@@ -110,6 +114,8 @@ namespace fwgetter
                                 File.Create(
                                     $@"{FwgetterDir}\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");
 
+                            streams.Add(writer);
+
                             requestDownload.ResponseWriter =
                                 stream => //sets the request to write straight to disk, skipping memory buffers
                                 {
@@ -125,11 +131,14 @@ namespace fwgetter
                             _logger.LogInformation(
                                 $"starting download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
-                            if (po.CancellationToken.IsCancellationRequested) return;
+                            QuitDel delFile = () => { File.Delete($@"{FwgetterDir}\ipsw\{firmwareListing.name}\{firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}.ipsw");};
+
+                            OnQuit += delFile;//add file to be deleted if DL doesn't finish
 
                             var response = await Task.Run(() => client.DownloadData(requestDownload), stoppingToken);
 
-                            if (po.CancellationToken.IsCancellationRequested) return;
+                            OnQuit -= delFile;//file will no longer be deleted
+
                             _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
                         }
@@ -176,6 +185,10 @@ namespace fwgetter
 
         public override Task StopAsync(CancellationToken cancellationToken)
         {
+            streams.ForEach(stream => {stream.Dispose();});//close all FileStreams to allow for deletion
+
+            OnQuit?.Invoke();//delete unfinished files
+
             var serializer = new BinaryFormatter();
 
             if (!File.Exists($@"{FwgetterDir}\ipsw\last.bin"))
@@ -185,6 +198,11 @@ namespace fwgetter
             }
 
             serializer.Serialize(File.Open($@"{FwgetterDir}\ipsw\last.bin",FileMode.Create),lastUpdates);
+
+            if (OnQuit?.GetInvocationList().Length > 0)//if there was any files deleted, the last downloaded is invalid. TODO optimize this.
+            {
+                File.Delete($@"{FwgetterDir}\ipsw\last.bin");
+            }
 
             _logger.LogCritical("successfully saved update log ");
             return base.StopAsync(cancellationToken);
