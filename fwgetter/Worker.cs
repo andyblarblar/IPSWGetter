@@ -15,13 +15,21 @@ namespace fwgetter
     {
         private readonly ILogger<Worker> _logger;
 
+        /// <summary>
+        /// A list of all the already downloaded updates
+        /// </summary>
         private Dictionary<string, string> lastUpdates = new Dictionary<string, string>();//phone name, buildId 
 
-        private readonly string FwgetterDir = Environment.GetEnvironmentVariable("FWGETTER_PATH", EnvironmentVariableTarget.User) ?? "C:\\";//sets the dir to wright files to, either by an enviormental var or {FwgetterDir}. 
+        private readonly string FwgetterDir = Environment.GetEnvironmentVariable("FWGETTER_PATH", EnvironmentVariableTarget.Machine) ?? "C:\\";//sets the dir to wright files to, either by an enviormental var or {FwgetterDir}. 
         
         private delegate void QuitDel();
         private event QuitDel OnQuit; 
         private List<FileStream> streams = new List<FileStream>();
+
+        /// <summary>
+        /// List of all files that have downloaded, to be added to the downloaded list 
+        /// </summary>
+        private List<KeyValuePair<string,string>> doneDownloads = new List<KeyValuePair<string, string>>();
 
         public Worker(ILogger<Worker> logger)
         {
@@ -32,6 +40,7 @@ namespace fwgetter
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogCritical($"using path: {FwgetterDir}");
+
             if (File.Exists($@"{FwgetterDir}\ipsw\last.bin"))//load past history
             {
                 var serializer = new BinaryFormatter();
@@ -135,9 +144,11 @@ namespace fwgetter
 
                             OnQuit += delFile;//add file to be deleted if DL doesn't finish
 
-                            var response = await Task.Run(() => client.DownloadData(requestDownload), stoppingToken);
+                            var response = await Task.Run(() => client.DownloadData(requestDownload), stoppingToken);//actually download
 
                             OnQuit -= delFile;//file will no longer be deleted
+
+                            doneDownloads.Add(new KeyValuePair<string, string>(firmwareListing.name,firmwareListing.firmwares[0].buildid));
 
                             _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
 
@@ -159,15 +170,15 @@ namespace fwgetter
 
                 });
 
-                foreach (var firmwareListing in firmwareListings)//update update history
+                foreach (var finishedDownload in doneDownloads)//update update history
                 {
                     try
                     {
-                        if (!lastUpdates.Contains(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid)))
+                        if (!lastUpdates.Contains(finishedDownload))
                         {
-                            lastUpdates.Add(firmwareListing.name, firmwareListing.firmwares[0].buildid);
+                            lastUpdates.Add(finishedDownload.Key, finishedDownload.Value);
                             _logger.LogInformation(
-                                $"added entry to update history: {firmwareListing.name},{firmwareListing.firmwares[0].version},{firmwareListing.firmwares[0].buildid}");
+                                $"added entry to update history: {finishedDownload.Key}, {finishedDownload.Value}");
                         }
                     }
                     catch (Exception)
@@ -190,19 +201,7 @@ namespace fwgetter
             OnQuit?.Invoke();//delete unfinished files
 
             var serializer = new BinaryFormatter();
-
-            if (!File.Exists($@"{FwgetterDir}\ipsw\last.bin"))
-            {
-                File.Create($@"{FwgetterDir}\ipsw\last.bin").Dispose();
-                
-            }
-
-            serializer.Serialize(File.Open($@"{FwgetterDir}\ipsw\last.bin",FileMode.Create),lastUpdates);
-
-            if (OnQuit?.GetInvocationList().Length > 0)//if there was any files deleted, the last downloaded is invalid. TODO optimize this.
-            {
-                File.Delete($@"{FwgetterDir}\ipsw\last.bin");
-            }
+            serializer.Serialize(File.Open($@"{FwgetterDir}\ipsw\last.bin",FileMode.OpenOrCreate),lastUpdates);//write log of downloaded files
 
             _logger.LogCritical("successfully saved update log ");
             return base.StopAsync(cancellationToken);
