@@ -25,6 +25,7 @@ namespace fwgetter
         private delegate void QuitDel();
         private event QuitDel OnQuit; 
         private List<FileStream> streams = new List<FileStream>();
+        private List<Task> tasks = new List<Task>();
 
         /// <summary>
         /// List of all files that have downloaded, to be added to the downloaded list 
@@ -74,8 +75,7 @@ namespace fwgetter
             var requestFirmware = new RestRequest("device/{id}?type=ipsw");
             var po = new ParallelOptions { CancellationToken = stoppingToken };
 
-            while (!stoppingToken.IsCancellationRequested)//endless cycle
-            {
+       
                 var devices = client.Execute<List<JsonReps.device>>(requestDevices).Data;
                 devices.ForEach((item) => _logger.LogDebug(item.identifier));
                 var firmwareListings = new List<JsonReps.FirmwareListing>();
@@ -144,14 +144,15 @@ namespace fwgetter
 
                             OnQuit += delFile;//add file to be deleted if DL doesn't finish
 
-                            var response = await Task.Run(() => client.DownloadData(requestDownload), stoppingToken);//actually download
+                            var response = new Task(() => { 
+                                client.DownloadData(requestDownload);
+                                OnQuit -= delFile;//remove file now that its done
+                                doneDownloads.Add(new KeyValuePair<string, string>(firmwareListing.name, firmwareListing.firmwares[0].buildid));//add to log now now that this is done
+                                _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
+                            }, stoppingToken);
 
-                            OnQuit -= delFile;//file will no longer be deleted
-
-                            doneDownloads.Add(new KeyValuePair<string, string>(firmwareListing.name,firmwareListing.firmwares[0].buildid));
-
-                            _logger.LogInformation($"finished download of {firmwareListing.name},{firmwareListing.firmwares[0].buildid}");
-
+                            tasks.Add(response);//add to a task list to be invoked later
+                      
                         }
                     }
 
@@ -170,32 +171,38 @@ namespace fwgetter
 
                 });
 
-                foreach (var finishedDownload in doneDownloads)//update update history
-                {
-                    try
-                    {
-                        if (!lastUpdates.Contains(finishedDownload))
-                        {
-                            lastUpdates.Add(finishedDownload.Key, finishedDownload.Value);
-                            _logger.LogInformation(
-                                $"added entry to update history: {finishedDownload.Key}, {finishedDownload.Value}");
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        //ignore, this just means the device has no firmware
-                    }
-                }
+          
+            tasks.ForEach(task => {
+                task.Start();
+                _logger.LogDebug("sppinging up");
+                });//begin downloads
 
-                await Task.Delay(1800000, stoppingToken);
-            }
-
+            Task.WaitAll(tasks.ToArray(), stoppingToken);//wait for the downloads to finish, or cancel
+        
             await StopAsync(stoppingToken);
         }
 
 
         public override Task StopAsync(CancellationToken cancellationToken)
         {
+            foreach (var finishedDownload in doneDownloads)//update update history
+            {
+                try
+                {
+                    if (!lastUpdates.Contains(finishedDownload))
+                    {
+                        lastUpdates.Add(finishedDownload.Key, finishedDownload.Value);
+                        _logger.LogInformation(
+                            $"added entry to update history: {finishedDownload.Key}, {finishedDownload.Value}");
+                    }
+                }
+                catch (Exception)
+                {
+                    //ignore, this just means the device has no firmware
+                }
+
+            }
+
             streams.ForEach(stream => {stream.Dispose();});//close all FileStreams to allow for deletion
 
             OnQuit?.Invoke();//delete unfinished files
